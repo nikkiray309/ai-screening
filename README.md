@@ -64,3 +64,60 @@ Try invalid values such as `CUST-12`, amount `0`, or a short reason. The server 
 - Pydantic models define the strict validation constraints; each tool validates its arguments before performing its mock action.
 - The stdio transport carries MCP JSON-RPC messages through stdin/stdout. Logging is configured for stderr so it does not contaminate the protocol stream.
 - The assessment describes `CUST-XXXXX` but does not specify the allowed characters. This implementation interprets `X` as a digit.
+
+## Task 2 — MCP security gateway
+
+Task 2 adds a lightweight HTTP JSON-RPC gateway and a mock downstream MCP endpoint. Both use Python's standard library, so no additional packages are needed.
+
+### Start the mock downstream server
+
+In the first PowerShell window, from the project directory, run:
+
+```powershell
+uv run python task2_mock_downstream.py
+```
+
+It listens on `http://127.0.0.1:8001/` and provides `get_status` and `admin_reset_key` mock tools.
+
+### Start the gateway
+
+In a second PowerShell window, run:
+
+```powershell
+uv run python task2_gateway.py
+```
+
+The gateway listens at `http://127.0.0.1:8000/`. It accepts POSTed MCP JSON-RPC requests and forwards them to the mock server. The local demo tokens are `admin-demo-token` and `viewer-demo-token`. For a local demo, they can be replaced by setting a JSON token-to-role map before starting the gateway:
+
+```powershell
+$env:MCP_GATEWAY_TOKENS = '{"my-admin-token":"admin","my-viewer-token":"viewer"}'
+uv run python task2_gateway.py
+```
+
+The gateway requires a valid bearer token. `tools/list` is forwarded without filtering the tool list. Calls to names beginning with `admin_` require the `admin` role; a viewer receives JSON-RPC error `-32001` and the request is not forwarded. Other tool calls pass through.
+
+### Send example requests
+
+In a third PowerShell window, list tools as a viewer:
+
+```powershell
+$headers = @{ Authorization = 'Bearer viewer-demo-token' }
+$body = '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+Invoke-RestMethod -Uri http://127.0.0.1:8000/ -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+```
+
+Try an ordinary tool call as a viewer:
+
+```powershell
+$body = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_status","arguments":{}}}'
+Invoke-RestMethod -Uri http://127.0.0.1:8000/ -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+```
+
+Then try the admin-only tool with that viewer token. It should return `-32001`:
+
+```powershell
+$body = '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"admin_reset_key","arguments":{}}}'
+Invoke-RestMethod -Uri http://127.0.0.1:8000/ -Method Post -Headers $headers -ContentType 'application/json' -Body $body
+```
+
+Change the header to `Bearer admin-demo-token` and repeat the last call; the mock server will return a simulated success. These demo tokens are for local practice only; configure private tokens through the environment variable for any non-demo use.
