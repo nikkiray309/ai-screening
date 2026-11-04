@@ -1,7 +1,7 @@
 [project]
 name = "ai-screening"
 version = "0.1.0"
-description = "Task 1 MCP customer tools assessment server"
+description = "AI Field Developer assessment task examples"
 readme = "README.md"
 authors = [
     { name = "nikkiray309", email = "nikhitharayabarapu@gmail.com" }

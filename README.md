@@ -156,3 +156,58 @@ curl.exe -N -H 'Content-Type: application/json' --data-raw $body http://127.0.0.
 ```
 
 The response is a Server-Sent Events (SSE) stream. It should contain `[REDACTED]` in place of the email, SSN, and card number, followed by `data: [DONE]`. The mock provider echoes the prompt only for this local demonstration. The gateway currently expects an upstream API that uses OpenAI-compatible SSE delta events; other provider formats need an adapter.
+
+## Task 4 — token-limited model router with fallback
+
+Task 4 adds an HTTP completion endpoint, an on-disk SQLite sliding-window limiter, and primary-to-backup routing. It uses only the Python standard library.
+
+### Start the local mock providers
+
+In one PowerShell window:
+
+```powershell
+uv run python task4_mock_provider.py
+```
+
+The mock primary and backup endpoints listen on port `8005`. By default, the primary succeeds. To make the primary return HTTP 429, restart the provider in a new PowerShell window with:
+
+```powershell
+$env:MOCK_PRIMARY_MODE = '429'
+uv run python task4_mock_provider.py
+```
+
+For the timeout scenario, use `timeout` instead of `429`. Stop the existing provider first with Ctrl+C. The mock primary then takes longer than the gateway's three-second timeout; the backup remains available.
+
+### Start the router
+
+In another PowerShell window:
+
+```powershell
+uv run python task4_router.py
+```
+
+The router listens at `http://127.0.0.1:8007/v1/completions`. It stores rate-limit events in `task4_rate_limit.sqlite3` in the current directory. That local database is ignored by Git.
+
+### Send a completion request
+
+In a third PowerShell window:
+
+```powershell
+$body = @{ prompt = 'Say hello'; max_tokens = 30 } | ConvertTo-Json -Compress
+curl.exe -i -H 'Authorization: Bearer tenant-demo-key' -H 'Content-Type: application/json' --data-raw $body http://127.0.0.1:8007/v1/completions
+```
+
+A successful primary response reports `primary-demo`. When the primary is configured to return 429 or time out, the router tries the backup; a successful fallback reports `backup-demo` and includes `X-Model-Fallback: backup`.
+
+### Check the token limit
+
+For a quick local limiter demonstration, stop the router and restart it with a smaller limit:
+
+```powershell
+$env:TOKEN_LIMIT_PER_MINUTE = '100'
+uv run python task4_router.py
+```
+
+Send the same request several times using the same bearer key. The router reserves an estimated prompt cost plus `max_tokens`; when the per-minute total would exceed 100, it returns HTTP 429 with a standardized `RATE_LIMIT_EXCEEDED` error. Use a different bearer key for a fresh counter. The default limit is 50,000 estimated tokens per minute per key.
+
+The assessment does not specify a tokenizer or provider, so this demo estimates input tokens as one token per four prompt characters and reserves the requested output allowance. The SQLite transaction serializes concurrent reservations, and the database stores a hash of the API key instead of the raw key. Upstream errors are replaced with gateway error codes and messages; raw provider bodies and stack traces are not returned to the caller.
