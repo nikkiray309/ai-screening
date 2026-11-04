@@ -1,14 +1,11 @@
 import logging
-
 from pydantic import BaseModel, Field
 from mcp.server import MCPServer
 
 
 # Configure logs to go to stderr, leaving stdout free for MCP messages.
 logging.basicConfig(level=logging.INFO)
-
 server = MCPServer("customer-tools")
-
 
 class CustomerIdInput(BaseModel):
     customer_id: str = Field(pattern=r"^CUST-\d{5}$")
@@ -18,7 +15,6 @@ class RefundInput(BaseModel):
     customer_id: str = Field(pattern=r"^CUST-\d{5}$")
     amount: float = Field(gt=0)
     reason: str = Field(min_length=10)
-
 
 @server.tool()
 def get_customer_record(customer_id: str) -> dict:
